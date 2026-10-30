@@ -1,0 +1,25 @@
+{{- if .Values.bertha.network.enabled -}}
+{{- $active := false -}}
+{{- range .Values.bertha.nodes -}}
+  {{- if .enabled -}}{{- $active = true -}}{{- end -}}
+{{- end -}}
+{{- if not $active -}}
+  {{- fail "enable a Bertha node policy before enabling the RNIC network" -}}
+{{- end -}}
+{{- $namespace := required "bertha.network.namespace is required" .Values.bertha.network.namespace -}}
+{{- $name := required "bertha.network.name is required" .Values.bertha.network.name -}}
+{{- if ne .Values.bertha.network.ipam.type "static" -}}
+  {{- fail "the Bertha validation network uses static IPAM with explicit per-Pod addresses" -}}
+{{- end }}
+apiVersion: sriovnetwork.openshift.io/v1
+kind: SriovNetwork
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  networkNamespace: {{ $namespace | quote }}
+  resourceName: bertha_rnic
+  vlan: {{ .Values.bertha.network.vlan }}
+  capabilities: '{"ips":true}'
+  ipam: {{ .Values.bertha.network.ipam | toJson | quote }}
+{{- end }}

@@ -1,0 +1,66 @@
+# Use with the existing chart and all four --set-file extraDeploy arguments.
+# See doc/bertha-deployment.md. This profile never installs host drivers.
+operator:
+  clusterType: kubernetes
+  nodeSelector:
+    kubernetes.io/os: linux
+  resourcePrefix: hyperaccel.ai
+  cniBinPath: /opt/cni/bin
+  admissionControllers:
+    enabled: true
+    certificates:
+      certManager:
+        enabled: true
+        generateSelfSigned: true
+
+sriovOperatorConfig:
+  deploy: true
+  configDaemonNodeSelector:
+    kubernetes.io/os: linux
+    hyperaccel.ai/thor2-planned: "true"
+    hyperaccel.ai/thor2-config: "enabled"
+  configurationMode: daemon
+  disableDrain: false
+  logLevel: 2
+
+# Set verified image tags/digests in a site values file; do not use latest.
+# Add the verified "14e4 PF_DEVICE_ID VF_DEVICE_ID" mapping here in that file.
+supportedExtraNICs: []
+
+bertha:
+  # Lowercase PCI PF device ID, without 0x. Must match supportedExtraNICs.
+  deviceID: ""
+  nodes:
+    bertha-xlarge-101:
+      enabled: false
+      rootDevices: []
+    bertha-xlarge-102:
+      enabled: false
+      rootDevices: []
+    bertha-xlarge-105:
+      # Control-plane node: activate separately after a worker is validated.
+      enabled: false
+      rootDevices: []
+    bertha-xlarge-109:
+      enabled: false
+      rootDevices: []
+  network:
+    enabled: false
+    # Create this namespace before enabling the network.
+    namespace: bertha-rdma-test
+    name: bertha-rdma
+    vlan: 0
+    # Test network only: every Pod supplies a distinct, reserved address.
+    # The static CNI binary must already exist in /opt/cni/bin on target nodes.
+    ipam:
+      type: static
+  validation:
+    enabled: false
+    # Runtime-compatible userspace image, not a kernel-driver installer.
+    image: ""
+    # Addresses must belong to the real RNIC network. No example IP is deployed.
+    nodes:
+      bertha-xlarge-101:
+        address: ""
+      bertha-xlarge-102:
+        address: ""

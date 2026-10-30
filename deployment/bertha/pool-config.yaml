@@ -1,0 +1,11 @@
+apiVersion: sriovnetwork.openshift.io/v1
+kind: SriovNetworkPoolConfig
+metadata:
+  name: bertha-thor2
+  namespace: {{ .Release.Namespace }}
+spec:
+  maxUnavailable: 1
+  nodeSelector:
+    matchLabels:
+      hyperaccel.ai/thor2-planned: "true"
+      hyperaccel.ai/thor2-config: "enabled"

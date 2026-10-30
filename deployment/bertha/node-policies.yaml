@@ -1,0 +1,67 @@
+{{- range $name, $image := .Values.images -}}
+  {{- if or (not (regexMatch "(@sha256:[0-9a-f]{64}|:[^/:]+)$" $image)) (hasSuffix ":latest" $image) -}}
+    {{- fail (printf "images.%s must use an explicit non-latest tag or sha256 digest" $name) -}}
+  {{- end -}}
+{{- end -}}
+{{- $allowedNodes := list "bertha-xlarge-101" "bertha-xlarge-102" "bertha-xlarge-105" "bertha-xlarge-109" -}}
+{{- $separator := "" -}}
+{{- range $name, $node := .Values.bertha.nodes -}}
+  {{- if not (has $name $allowedNodes) -}}
+    {{- fail (printf "node %s is not a Bertha RNIC target" $name) -}}
+  {{- end -}}
+  {{- if $node.enabled -}}
+    {{- $deviceID := required "bertha.deviceID is required before activating a node" $.Values.bertha.deviceID -}}
+    {{- if not (regexMatch "^[0-9a-f]{4}$" $deviceID) -}}
+      {{- fail "bertha.deviceID must be four lowercase hexadecimal digits without 0x" -}}
+    {{- end -}}
+    {{- if has $deviceID (list "16d6" "16d7" "1657") -}}
+      {{- fail "bertha.deviceID selects an existing Broadcom NIC, not the new Thor 2 RNICs" -}}
+    {{- end -}}
+    {{- $supported := false -}}
+    {{- range $.Values.supportedExtraNICs -}}
+      {{- range $entry, $ids := fromYaml . -}}
+        {{- if regexMatch (printf "^14e4 %s [0-9a-f]{4}$" $deviceID) (toString $ids) -}}
+          {{- $supported = true -}}
+        {{- end -}}
+      {{- end -}}
+    {{- end -}}
+    {{- if not $supported -}}
+      {{- fail "supportedExtraNICs must contain the verified Broadcom vendor/PF/VF ID mapping for bertha.deviceID" -}}
+    {{- end -}}
+    {{- if ne (len $node.rootDevices) 2 -}}
+      {{- fail (printf "%s must specify exactly two RNIC PF PCI addresses" $name) -}}
+    {{- end -}}
+    {{- if ne (len (uniq $node.rootDevices)) 2 -}}
+      {{- fail (printf "%s PF PCI addresses must be distinct" $name) -}}
+    {{- end -}}
+    {{- range $address := $node.rootDevices -}}
+      {{- if not (regexMatch "^[0-9a-f]{4}:[0-9a-f]{2}:[01][0-9a-f]\\.[0-7]$" $address) -}}
+        {{- fail (printf "%s has an invalid PF PCI address: %s" $name $address) -}}
+      {{- end -}}
+    {{- end -}}
+{{ $separator }}
+apiVersion: sriovnetwork.openshift.io/v1
+kind: SriovNetworkNodePolicy
+metadata:
+  name: thor2-{{ $name }}
+  namespace: {{ $.Release.Namespace }}
+spec:
+  resourceName: bertha_rnic
+  priority: 10
+  nodeSelector:
+    kubernetes.io/hostname: {{ $name | quote }}
+    hyperaccel.ai/thor2-planned: "true"
+    hyperaccel.ai/thor2-config: "enabled"
+  nicSelector:
+    vendor: "14e4"
+    deviceID: {{ $deviceID | quote }}
+    rootDevices:
+      {{- toYaml $node.rootDevices | nindent 6 }}
+  numVfs: 1
+  deviceType: netdevice
+  isRdma: true
+  linkType: eth
+  externallyManaged: false
+    {{- $separator = "\n---" -}}
+  {{- end }}
+{{- end }}

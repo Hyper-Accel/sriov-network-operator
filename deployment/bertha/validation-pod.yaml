@@ -1,0 +1,99 @@
+{{- if .Values.bertha.validation.enabled -}}
+{{- if not .Values.bertha.network.enabled -}}
+  {{- fail "enable bertha.network before enabling validation Pods" -}}
+{{- end -}}
+{{- $image := required "bertha.validation.image must contain the runtime-compatible RDMA userspace" .Values.bertha.validation.image -}}
+{{- if or (not (regexMatch "(@sha256:[0-9a-f]{64}|:[^/:]+)$" $image)) (hasSuffix ":latest" $image) -}}
+  {{- fail "bertha.validation.image must use an explicit non-latest tag or sha256 digest" -}}
+{{- end -}}
+{{- if lt (len .Values.bertha.validation.nodes) 2 -}}
+  {{- fail "validation requires at least two nodes for inter-node RDMA testing" -}}
+{{- end -}}
+{{- $addresses := list -}}
+{{- $separator := "" -}}
+{{- range $name, $config := .Values.bertha.validation.nodes -}}
+  {{- $node := index $.Values.bertha.nodes $name -}}
+  {{- if not $node -}}
+    {{- fail (printf "validation node %s is not a configured Bertha node" $name) -}}
+  {{- end -}}
+  {{- if not $node.enabled -}}
+    {{- fail (printf "enable the policy for %s before creating its validation Pod" $name) -}}
+  {{- end -}}
+  {{- $address := required (printf "a reserved IPv4 CIDR address is required for validation node %s" $name) $config.address -}}
+  {{- if not (regexMatch "^([0-9]{1,3}\\.){3}[0-9]{1,3}/([0-9]|[12][0-9]|3[0-2])$" $address) -}}
+    {{- fail (printf "validation address for %s must be an IPv4 address with prefix length" $name) -}}
+  {{- end -}}
+  {{- $ip := first (splitList "/" $address) -}}
+  {{- range splitList "." $ip -}}
+    {{- if gt (int .) 255 -}}
+      {{- fail (printf "invalid IPv4 address for validation node %s" $name) -}}
+    {{- end -}}
+  {{- end -}}
+  {{- if has $ip $addresses -}}
+    {{- fail "validation Pod IP addresses must be distinct, including across prefix lengths" -}}
+  {{- end -}}
+  {{- $addresses = append $addresses $ip -}}
+  {{- $attachment := dict "name" $.Values.bertha.network.name "namespace" $.Values.bertha.network.namespace "interface" "net1" "ips" (list $address) -}}
+{{ $separator }}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: thor2-check-{{ $name }}
+  namespace: {{ $.Values.bertha.network.namespace }}
+  labels:
+    app.kubernetes.io/name: bertha-rdma-validation
+  annotations:
+    k8s.v1.cni.cncf.io/networks: {{ list $attachment | toJson | quote }}
+spec:
+  restartPolicy: Never
+  automountServiceAccountToken: false
+  nodeSelector:
+    kubernetes.io/hostname: {{ $name | quote }}
+    hyperaccel.ai/thor2-planned: "true"
+    hyperaccel.ai/thor2-config: "enabled"
+  {{- with $.Values.imagePullSecrets }}
+  imagePullSecrets:
+    {{- range . }}
+    - name: {{ . | quote }}
+    {{- end }}
+  {{- end }}
+  containers:
+    - name: rdma-check
+      image: {{ $image | quote }}
+      securityContext:
+        capabilities:
+          add: ["IPC_LOCK"]
+      resources:
+        requests:
+          cpu: 100m
+          memory: 256Mi
+          {{ $.Values.operator.resourcePrefix }}/bertha_rnic: "1"
+        limits:
+          memory: 512Mi
+          {{ $.Values.operator.resourcePrefix }}/bertha_rnic: "1"
+      command: ["/bin/sh", "-ec"]
+      args:
+        - |
+          ip -4 address show dev net1
+          test -e /sys/class/net/net1/device/physfn
+          vf=$(readlink -f /sys/class/net/net1/device)
+          found=false
+          for entry in /sys/class/infiniband/*; do
+            test -e "$entry/device" || continue
+            device=$(readlink -f "$entry/device")
+            case "$device" in
+              "$vf"|"$vf"/*)
+                ibv_devinfo -d "${entry##*/}" -v
+                found=true
+                ;;
+            esac
+          done
+          if test "$found" != true; then
+            echo "No RDMA device belongs to the allocated net1 VF" >&2
+            exit 1
+          fi
+          echo "RDMA_READY: allocated VF and its verbs device are accessible"
+          exec tail -f /dev/null
+  {{- $separator = "\n---" -}}
+{{- end }}
+{{- end }}
