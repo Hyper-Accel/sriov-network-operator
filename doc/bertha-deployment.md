@@ -27,7 +27,9 @@ an explicit `false` disables only the injector, not the policy webhook.
 
 ## Files and rendering
 
-`deployment/bertha/values.yaml` is an environment values overlay.
+`deployment/bertha/values.yaml` is the single checked-in Bertha configuration.
+It contains the installed image digests, verified PCI IDs and all four nodes'
+PF addresses; no separate site values file is required.
 `node-policies.yaml` and `pool-config.yaml` are Helm template strings,
 **not manifests to pass directly to kubectl**. The existing chart evaluates
 them through `extraDeploy`; no
@@ -43,18 +45,15 @@ PROFILE=./deployment/bertha
 CTX=kubernetes-admin@bertha-k8s-context
 KCFG="$HOME/.kube/config-bertha"
 NS=sriov-network-operator
-SITE=/absolute/path/to/your/bertha-site-values.yaml
 
 ARGS=(
   -f "$PROFILE/values.yaml"
-  -f "$SITE"
   --set-file "extraDeploy[0]=$PROFILE/node-policies.yaml"
   --set-file "extraDeploy[1]=$PROFILE/pool-config.yaml"
 )
 ```
 
-Create the site values file at your chosen path before running these commands.
-Keep it for subsequent upgrades. Do not omit either of the two `--set-file`
+Use these same arguments for subsequent upgrades. Do not omit either of the two `--set-file`
 arguments, replace `extraDeploy` elsewhere, or use `--reuse-values` to carry
 unreviewed settings forward.
 
@@ -87,26 +86,29 @@ Collect the real PF device ID, VF device ID, two PF PCI addresses per node,
 `1750/1806` mapping or the existing 10G NIC addresses as Thor 2 values.
 The profile rejects known existing NIC IDs `16d6`, `16d7`, and `1657`.
 
-## Site values and bootstrap
+## Checked-in defaults and bootstrap
 
-Set `images.*` to explicit, tested tags or digests in the site file. All image
-entries in the common chart must be pinned; untagged images and `:latest`
-are rejected by the profile. Keep operator, daemon and webhook images aligned
-with the source/chart revision and use compatible CNI and device-plugin images.
-The profile does not guess a release or publish a container image.
+All eleven `images.*` entries are pinned by digest in the Bertha values file,
+copied from the installed release. Operator, daemon and webhook images match
+upstream source commit `9163bcc7a8cbc4cfcb366c15ef5824ccfb30dab2`.
+Keep those components aligned when updating images. Untagged images and
+`:latest` are rejected by the profile.
 
-All nodes are disabled by default. With pinned images, the bootstrap render
-contains no node policies. The profile does not create a SriovNetwork or test
-Pods. It does include the operator configuration and a pool with
-`maxUnavailable: 1`. The daemon selector requires both:
+The default render creates only node101's policy, and the daemon selector is
+restricted to `kubernetes.io/hostname: bertha-xlarge-101`. Nodes102/105/109 have
+verified addresses but remain disabled until their cabling is ready and their
+activation is approved. The profile does not create a SriovNetwork or test
+Pods. It includes the operator configuration and a pool with
+`maxUnavailable: 1`. The daemon selector also requires both:
 
 ```text
 hyperaccel.ai/thor2-planned=true
 hyperaccel.ai/thor2-config=enabled
 ```
 
-Keep the second label absent during bootstrap. Before installation, confirm
-there are no matching nodes and no existing SR-IOV operator managing them:
+For a new installation, keep the second label absent during bootstrap and
+confirm no other SR-IOV operator manages the target node. For an existing
+installation, preserve activation labels and use the existing release:
 
 ```bash
 kubectl --kubeconfig="$KCFG" --context="$CTX" get nodes \
@@ -116,8 +118,8 @@ helm template sriov-network-operator "$CHART" \
   -n "$NS" --kube-version 1.36.4 "${ARGS[@]}"
 ```
 
-An initial render without pinned images is expected to fail. Lint/render is
-local validation, not proof that images can be pulled or hardware works.
+These commands need no image or hardware overrides. Lint/render is local
+validation, not proof that images can be pulled or hardware works.
 The profile and shared document-boundary regression checks run without a
 cluster using `bash test/scripts/bertha_helm_test.sh`. The tests use render-only
 images and synthetic hardware fixtures, and also check the verified node101
@@ -140,21 +142,21 @@ not a reason to use `--skip-crds`: the SR-IOV CRDs still need installation.
 
 ## Activate one node at a time
 
-The base values now contain node101's verified mapping, `14e4 1760 1819`,
-and PF addresses `0000:4a:00.0` and `0000:c8:00.0`. Node101 remains disabled
-in the base profile. Activate it through your site values file and additionally
-set `sriovOperatorConfig.configDaemonNodeSelector.kubernetes.io/hostname`
-to `bertha-xlarge-101` for a first-node rollout. Leave other nodes disabled.
+The checked-in mapping is `14e4 1760 1819` (vendor/PF/VF), with
+`bertha.deviceID: "1760"`. The verified addresses are:
 
-For other hardware, add its verified mapping to `supportedExtraNICs`.
-Each list item is a YAML string with the structure
-`Broadcom_BCM57608: "14e4 PF_ID VF_ID"`, where both IDs are four lowercase
-hexadecimal digits obtained from the hardware/vendor data. Set
-`bertha.deviceID` to the same PF ID. These are required site inputs, not
-literal values to copy.
+| Node | PF 1 | PF 2 | Enabled |
+| --- | --- | --- | --- |
+| bertha-xlarge-101 | `0000:4a:00.0` | `0000:c8:00.0` | true |
+| bertha-xlarge-102 | `0000:4a:00.0` | `0000:c8:00.0` | false |
+| bertha-xlarge-105 | `0000:4a:00.0` | `0000:c8:00.0` | false |
+| bertha-xlarge-109 | `0000:0b:00.0` | `0001:0b:00.0` | false |
 
-Under `bertha.nodes.bertha-xlarge-101`, set `enabled: true` and put exactly two
-distinct PF PCI addresses in `rootDevices`. Leave the other nodes disabled.
+Preserve the nonzero PCI domain on node109's second PF. Node101 is already
+enabled in the values file and selected by the daemon hostname restriction.
+Leave other nodes disabled for now. Future expansion requires a reviewed
+change to their `enabled` fields and the daemon hostname restriction in this
+same file, followed by labeling only the intended nodes.
 Do not use `vendor: 14e4` alone, broad device-name matching, or an empty PCI
 allowlist. The template fixes `numVfs: 1`, `deviceType: netdevice`,
 `isRdma: true`, `linkType: eth`, and `externallyManaged: false`.
@@ -172,7 +174,7 @@ after-hours maintenance window.
 the infrastructure PF baseline intended for RoCE active MTU **4096**.
 Infrastructure reports MTU **9100** on all eight Thor 2 switch ports (two per
 node on 101, 102, 105 and 109). That accommodates the 4200 host setting; it does
-not require raising host MTU to 9100. Override `bertha.mtu` in site values only
+not require raising host MTU to 9100. Change `bertha.mtu` in the checked-in values only
 when changing the agreed host/network configuration.
 
 The operator applies this MTU to the selected netdevice VFs and raises a
@@ -225,9 +227,11 @@ longer shipped. Their observed setup, commands and results are retained in
 
 Repository cleanup does not change the installed Helm release. Before upgrading
 a release that previously included those test resources, preserve its active
-node selections and pinned images in your site values, inspect its existing
+node selections and pinned images in the checked-in values, inspect its existing
 manifest, and review the removal of the Helm-managed test Pod and SriovNetwork.
-Do not apply the disabled base defaults over an active deployment.
+The current defaults preserve node101 activation but intentionally omit those
+historical test resources. They also include the reviewed injector-disable
+setting; do not assume a repository update has already changed the cluster.
 
 ## RDMA SR-IOV firmware prerequisite
 

@@ -103,7 +103,7 @@ test_Bertha_Disables_Drain_During_Validation() {
 
 test_Bootstrap_Has_No_Policies_Network_Or_Pods() {
     local output status
-    output=$(renderBertha 2>&1)
+    output=$(renderBertha --set bertha.nodes.bertha-xlarge-101.enabled=false 2>&1)
     status=$?
     assertEquals "$output" 0 "$status"
     assertContains "$output" "kind: SriovNetworkPoolConfig"
@@ -183,11 +183,10 @@ test_Untagged_And_Latest_Images_Are_Rejected() {
     assertNotEquals "$output" 0 "$?"
 }
 
-test_Verified_Node101_Policy_Is_Narrowly_Selected() {
+test_Checked_In_Defaults_Render_Node101_Without_Overrides() {
     local output status
     output=$(helm template bertha-test "$CHART" -n sriov-network-operator \
-        -f "$PROFILE/values.yaml" --set-json "images=$IMAGES" \
-        --set bertha.nodes.bertha-xlarge-101.enabled=true \
+        -f "$PROFILE/values.yaml" \
         --set-file "extraDeploy[0]=$PROFILE/node-policies.yaml" \
         --set-file "extraDeploy[1]=$PROFILE/pool-config.yaml" 2>&1)
     status=$?
@@ -202,6 +201,25 @@ test_Verified_Node101_Policy_Is_Narrowly_Selected() {
     assertNotContains "$output" "thor2-bertha-xlarge-105"
     assertNotContains "$output" "thor2-bertha-xlarge-109"
     assertEquals "0" "$(printf '%s\n' "$output" | awk '$0 == "kind: SriovNetwork" || $0 == "kind: Pod" {n++} END {print n+0}')"
+}
+
+test_Checked_In_PF_Addresses_Are_Used_When_Nodes_Are_Enabled() {
+    local output status
+    output=$(helm template bertha-test "$CHART" -n sriov-network-operator \
+        -f "$PROFILE/values.yaml" \
+        --set bertha.nodes.bertha-xlarge-102.enabled=true \
+        --set bertha.nodes.bertha-xlarge-105.enabled=true \
+        --set bertha.nodes.bertha-xlarge-109.enabled=true \
+        --set-file "extraDeploy[0]=$PROFILE/node-policies.yaml" \
+        --set-file "extraDeploy[1]=$PROFILE/pool-config.yaml" \
+        --show-only templates/extra-list.yaml 2>&1)
+    status=$?
+    assertEquals "$output" 0 "$status"
+    assertEquals "4" "$(printf '%s\n' "$output" | awk '$0 == "kind: SriovNetworkNodePolicy" {n++} END {print n+0}')"
+    assertEquals "3" "$(printf '%s\n' "$output" | awk '$1 == "-" && $2 == "0000:4a:00.0" {n++} END {print n+0}')"
+    assertEquals "3" "$(printf '%s\n' "$output" | awk '$1 == "-" && $2 == "0000:c8:00.0" {n++} END {print n+0}')"
+    assertContains "$output" "0000:0b:00.0"
+    assertContains "$output" "0001:0b:00.0"
 }
 
 source "$SCRIPTPATH/shunit2"

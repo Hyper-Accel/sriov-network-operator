@@ -18,6 +18,7 @@ sriovOperatorConfig:
   # Workloads explicitly request VF resources; keep policy validation enabled.
   enableInjector: false
   configDaemonNodeSelector:
+    kubernetes.io/hostname: bertha-xlarge-101
     kubernetes.io/os: linux
     hyperaccel.ai/thor2-planned: "true"
     hyperaccel.ai/thor2-config: "enabled"
@@ -26,7 +27,21 @@ sriovOperatorConfig:
   disableDrain: true
   logLevel: 2
 
-# Set verified image tags/digests in a site values file; do not use latest.
+# Digests from the installed Bertha release. Operator, daemon and webhook match
+# upstream source commit 9163bcc7a8cbc4cfcb366c15ef5824ccfb30dab2.
+images:
+  operator: ghcr.io/k8snetworkplumbingwg/sriov-network-operator@sha256:6cae45b994cc316117d1bd78385aee5eeb48a4ca23f0fd9ad704a954d4f310f5
+  sriovConfigDaemon: ghcr.io/k8snetworkplumbingwg/sriov-network-operator-config-daemon@sha256:d3517f9c4d78d818781e57928b9ba0809ea4b9e3c7c883ac577a114866ddb62c
+  webhook: ghcr.io/k8snetworkplumbingwg/sriov-network-operator-webhook@sha256:db2ab104860b15f80a3eca91692041bbedaff2e7d6da69459af61c5206caccb1
+  sriovCni: ghcr.io/k8snetworkplumbingwg/sriov-cni@sha256:d3c652655ca967e61187eaa0852494c5914dd8cacca395fb39b13e4d42aaad93
+  ibSriovCni: ghcr.io/k8snetworkplumbingwg/ib-sriov-cni@sha256:49a69e5a27655e87c6b82d399b2e10b5093ed77b35d240cc5bbefc3d22db4643
+  ovsCni: ghcr.io/k8snetworkplumbingwg/ovs-cni-plugin@sha256:29d482513204a09692591e9749506b886b88de86a4f49a0d2055cc3cbf54a599
+  rdmaCni: ghcr.io/k8snetworkplumbingwg/rdma-cni@sha256:68ff5816f0cdc18c0db38407bb2725ab569314875c6272c9fa02d80127b88b32
+  sriovDevicePlugin: ghcr.io/k8snetworkplumbingwg/sriov-network-device-plugin@sha256:3292a7b4efa8423c98eab63f74bc7091d333d979af0a9735c6934d35ad39dc88
+  resourcesInjector: ghcr.io/k8snetworkplumbingwg/network-resources-injector@sha256:109f505d828d51d80bd9bc1e05a060824fb500d6b1ffafc45cc56231932f5b81
+  metricsExporter: ghcr.io/k8snetworkplumbingwg/sriov-network-metrics-exporter@sha256:18fea2cc97d3f0a627684ad81b9c4004236976e8d2a4af4afa19e37c09234ddc
+  metricsExporterKubeRbacProxy: quay.io/brancz/kube-rbac-proxy@sha256:a6075902738eaf1780390561ea998a53a056ef1d2b312bcbf0e2e81fec084b3c
+
 # Verified on node101; VF ID is advertised by both PFs' SR-IOV capability.
 supportedExtraNICs:
   - 'Broadcom_BCM57608: "14e4 1760 1819"'
@@ -39,17 +54,23 @@ bertha:
   deviceID: "1760"
   nodes:
     bertha-xlarge-101:
-      enabled: false
+      enabled: true
       rootDevices:
         - "0000:4a:00.0"
         - "0000:c8:00.0"
     bertha-xlarge-102:
       enabled: false
-      rootDevices: []
+      rootDevices:
+        - "0000:4a:00.0"
+        - "0000:c8:00.0"
     bertha-xlarge-105:
       # Control-plane node: activate separately after a worker is validated.
       enabled: false
-      rootDevices: []
+      rootDevices:
+        - "0000:4a:00.0"
+        - "0000:c8:00.0"
     bertha-xlarge-109:
       enabled: false
-      rootDevices: []
+      rootDevices:
+        - "0000:0b:00.0"
+        - "0001:0b:00.0"
