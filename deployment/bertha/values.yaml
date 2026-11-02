@@ -29,6 +29,9 @@ supportedExtraNICs:
   - 'Broadcom_BCM57608: "14e4 1760 1819"'
 
 bertha:
+  # Ethernet MTU matching the infrastructure PF baseline for RoCE MTU 4096.
+  # Thor 2 switch ports use MTU 9100; host MTU need not match that ceiling.
+  mtu: 4200
   # Lowercase PCI PF device ID, without 0x. Must match supportedExtraNICs.
   deviceID: "1760"
   nodes:

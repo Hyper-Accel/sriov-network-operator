@@ -68,10 +68,21 @@ test_Exactly_One_VF_Per_PF_On_All_Four_Nodes() {
     assertEquals "$output" 0 "$status"
     assertEquals "4" "$(printf '%s\n' "$output" | awk '$0 == "kind: SriovNetworkNodePolicy" {n++} END {print n+0}')"
     assertEquals "4" "$(printf '%s\n' "$output" | awk '$1 == "numVfs:" && $2 == "1" {n++} END {print n+0}')"
+    assertEquals "4" "$(printf '%s\n' "$output" | awk '$1 == "mtu:" && $2 == "4200" {n++} END {print n+0}')"
     assertEquals "4" "$(printf '%s\n' "$output" | awk '$1 == "externallyManaged:" && $2 == "false" {n++} END {print n+0}')"
     assertContains "$output" 'kubernetes.io/hostname: "bertha-xlarge-105"'
     assertContains "$output" "0001:84:00.0"
     assertContains "$output" "maxUnavailable: 1"
+}
+
+test_MTU_Override_Applies_To_All_Enabled_Node_Policies() {
+    local output status
+    output=$(renderBertha --set-json "bertha.nodes=$FOUR_NODES" \
+        --set bertha.mtu=9000 2>&1)
+    status=$?
+    assertEquals "$output" 0 "$status"
+    assertEquals "4" "$(printf '%s\n' "$output" | awk '$1 == "mtu:" && $2 == "9000" {n++} END {print n+0}')"
+    assertEquals "0" "$(printf '%s\n' "$output" | awk '$1 == "mtu:" && $2 != "9000" {n++} END {print n+0}')"
 }
 
 test_One_Node_Can_Be_Activated_Independently() {

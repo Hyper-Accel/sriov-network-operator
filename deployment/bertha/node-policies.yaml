@@ -58,6 +58,7 @@ spec:
     rootDevices:
       {{- toYaml $node.rootDevices | nindent 6 }}
   numVfs: 1
+  mtu: {{ $.Values.bertha.mtu }}
   deviceType: netdevice
   isRdma: true
   linkType: eth

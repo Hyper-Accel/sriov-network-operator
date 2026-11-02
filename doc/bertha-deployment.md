@@ -149,6 +149,22 @@ allowlist. The template fixes `numVfs: 1`, `deviceType: netdevice`,
 `isRdma: true`, `linkType: eth`, and `externallyManaged: false`.
 Infrastructure installing drivers does not make VFs externally managed.
 
+`bertha.mtu` sets the policy's Ethernet MTU and defaults to **4200**, matching
+the infrastructure PF baseline intended for RoCE active MTU **4096**.
+Infrastructure reports MTU **9100** on all eight Thor 2 switch ports (two per
+node on 101, 102, 105 and 109). That accommodates the 4200 host setting; it does
+not require raising host MTU to 9100. Override `bertha.mtu` in site values only
+when changing the agreed host/network configuration.
+
+The operator applies this MTU to the selected netdevice VFs and raises a
+selected PF's MTU if it is smaller than the requested value; it does not lower
+a larger PF MTU. After deployment, verify VF Ethernet MTU with `ip link` and
+RDMA `active_mtu` with `ibv_devinfo` on both allocated VFs. The initial node101
+tests used Ethernet MTU 1500 / RDMA MTU 1024. A separate
+[node101 follow-up](bertha-node101-validation.md#mtu-4200-follow-up---2026-11-02)
+verified Ethernet MTU 4200 / RDMA MTU 4096 on both VFs and successful WRITE,
+READ and payload-integrity tests. Other nodes remain unvalidated.
+
 Render and upgrade using the same arguments. If support IDs changed after
 bootstrap, restart the operator, config daemon and webhook Pods after the
 ConfigMap update: the NIC ID map is loaded at process startup, not treated as

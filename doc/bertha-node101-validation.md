@@ -1,5 +1,65 @@
 # Node101 VF RDMA validation - 2026-11-02
 
+## MTU 4200 follow-up - 2026-11-02
+
+The follow-up applied `bertha.mtu: 4200` to **node101 only**. Infrastructure
+reported switch MTU 9100 on the eight Thor 2 ports; host PF MTU remained 4200.
+Nodes102/105/109 were not activated or tested because their RDMA cabling was
+not ready. The earlier 1500/1024 results below are retained as a separate run.
+
+### Application without node drain
+
+Changing existing VF MTU normally requests a full node drain in this operator.
+With the user's approval, the existing validation Pod was removed first and
+both VFs were confirmed back in the host with no remaining VF consumers.
+`disableDrain` was temporarily set to `true`, and the daemon's receipt of that
+setting was confirmed before updating the policy. The operator then configured
+both VFs to MTU 4200. No node drain, reboot, PDB change or unrelated workload
+eviction was performed.
+
+After successful reconciliation, `disableDrain: false` was restored and the
+primary validation Pod was recreated. Helm revision **7** was deployed, with
+the original image digests, node101-only daemon selector and test network
+preserved. Node state generation 3 reported `Succeeded`, no sync error and
+Ready; node101 remained schedulable and advertised two VF resources. The
+management default route remained on `ens3f0.120`.
+
+This was a controlled change with both VFs unused, not a recommendation to
+disable drain for arbitrary policy changes. Changes requiring an actual node
+drain or reboot are deferred to an after-hours maintenance window.
+
+### Hardware and communication results
+
+Both Pods ran on node101. Allocation order changed from the earlier run:
+
+| Role | Allocated VF | RDMA device | Ethernet MTU | RDMA active MTU | Port state |
+| --- | --- | --- | --- | --- | --- |
+| Primary/server | `0000:4b:00.0` | `bnxt_re0` | 4200 | 4096 | ACTIVE |
+| Temporary peer/client | `0000:c9:00.0` | `bnxt_re1` | 4200 | 4096 | ACTIVE |
+
+The primary Pod's Cilium IP was `10.245.0.156`; the peer's was `10.245.0.222`.
+Both Multus network-status annotations and `ip link show net1` reported 4200.
+`ibv_devinfo -v` reported active MTU 4096 and RoCE v2 at GID index 1 on both VFs.
+
+| Test | Configuration | Result |
+| --- | --- | --- |
+| RDMA WRITE | MTU 4096, 4096 bytes, 1000 iterations, one RC QP | Both exit 0; average 113.32 Gb/s |
+| RDMA READ | MTU 4096, 4096 bytes, 1000 iterations, one RC QP | Both exit 0; average 75.91 Gb/s |
+| RDMA-CM payload validation | `rping`, `-S 4096` on both sides, client `-C 10 -V` | Both exit 0; exactly 10 validated payload records |
+
+The perftest commands below were reused with `SERVER_DEV=bnxt_re0`,
+`CLIENT_DEV=bnxt_re1`, the newly observed server IP and **`-m 4096` on both
+endpoints** instead of `-m 1024`. The rping server used
+`fe80::9c56:f8ff:fef7:b5ba%net1`; the client source was
+`fe80::f03e:dfff:fe40:852e%net1`. Each server's LISTEN state was confirmed
+before starting its client, and every process had a 90-second timeout.
+
+These short runs verify functionality at the new MTU, not a throughput
+improvement or 400G qualification. They do not validate the other nodes or
+Bertha peer-memory DMA. The temporary peer was removed after testing; the
+primary Pod remains for inspection and consumes one VF. No test deployment
+files were reintroduced into the repository.
+
 ## Scope and result
 
 Validated two Pods on **bertha-xlarge-101 only**, each allocated one VF from
