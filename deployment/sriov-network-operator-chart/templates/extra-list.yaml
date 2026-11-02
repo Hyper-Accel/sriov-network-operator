@@ -1,8 +1,12 @@
 {{- range .Values.extraDeploy }}
----
+{{- $rendered := "" }}
 {{- if typeIs "string" . }}
-  {{- tpl . $ }}
+{{- $rendered = tpl . $ }}
 {{- else }}
-  {{- tpl (. | toYaml) $ }}
+{{- $rendered = tpl (. | toYaml) $ }}
+{{- end }}
+{{- if trim $rendered }}
+---
+{{ $rendered }}
 {{- end }}
 {{- end }}

@@ -5,7 +5,11 @@ metadata:
   name: default
   namespace: {{ .Release.Namespace }}
 spec:
+  {{- if hasKey .Values.sriovOperatorConfig "enableInjector" }}
+  enableInjector: {{ .Values.sriovOperatorConfig.enableInjector }}
+  {{- else }}
   enableInjector: {{ .Values.operator.admissionControllers.enabled }}
+  {{- end }}
   enableOperatorWebhook: {{ .Values.operator.admissionControllers.enabled }}
   {{- with .Values.sriovOperatorConfig.configDaemonNodeSelector }}
   configDaemonNodeSelector:
