@@ -160,6 +160,14 @@ allowlist. The template fixes `numVfs: 1`, `deviceType: netdevice`,
 `isRdma: true`, `linkType: eth`, and `externallyManaged: false`.
 Infrastructure installing drivers does not make VFs externally managed.
 
+During the node101-only validation phase, this profile sets
+`sriovOperatorConfig.disableDrain: true`. The validation Pod has been removed;
+confirm no VF consumers remain before each device configuration change.
+Revisit this setting before introducing production VF workloads. It skips
+automatic drain rather than postponing device changes, and does not disable
+reboots. Changes requiring node drain or reboot belong in the agreed
+after-hours maintenance window.
+
 `bertha.mtu` sets the policy's Ethernet MTU and defaults to **4200**, matching
 the infrastructure PF baseline intended for RoCE active MTU **4096**.
 Infrastructure reports MTU **9100** on all eight Thor 2 switch ports (two per

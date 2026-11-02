@@ -22,7 +22,8 @@ sriovOperatorConfig:
     hyperaccel.ai/thor2-planned: "true"
     hyperaccel.ai/thor2-config: "enabled"
   configurationMode: daemon
-  disableDrain: false
+  # Validation phase without VF consumers; revisit before production workloads.
+  disableDrain: true
   logLevel: 2
 
 # Set verified image tags/digests in a site values file; do not use latest.

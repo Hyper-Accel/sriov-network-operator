@@ -92,6 +92,15 @@ test_Bertha_Disables_Injector_But_Keeps_Policy_Webhook() {
     assertContains "$output" "enableOperatorWebhook: true"
 }
 
+test_Bertha_Disables_Drain_During_Validation() {
+    local output status
+    output=$(helm template bertha-test "$CHART" -f "$PROFILE/values.yaml" \
+        --show-only templates/sriovoperatorconfig.yaml 2>&1)
+    status=$?
+    assertEquals "$output" 0 "$status"
+    assertContains "$output" "disableDrain: true"
+}
+
 test_Bootstrap_Has_No_Policies_Network_Or_Pods() {
     local output status
     output=$(renderBertha 2>&1)
