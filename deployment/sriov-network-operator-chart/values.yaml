@@ -119,6 +119,9 @@ operator:
 sriovOperatorConfig:
   # deploy sriovOperatorConfig CR with the below values
   deploy: false
+  # Optional override for the network resources injector only.
+  # When omitted, follows operator.admissionControllers.enabled.
+  # enableInjector: false
   # node selectors for sriov-network-config-daemon
   configDaemonNodeSelector: {}
   # log level for both operator and sriov-network-config-daemon

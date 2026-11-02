@@ -14,6 +14,17 @@ implement an autonomous RDMA validator. Infrastructure provisions the runtime
 team's stack first. Test workloads and their network configuration are managed
 separately; they are not shipped as part of this profile.
 
+The profile keeps the policy validation webhook enabled through
+`operator.admissionControllers.enabled: true`, but disables the network
+resources injector with `sriovOperatorConfig.enableInjector: false`.
+Workload creators must supply both the Multus network attachment annotation
+and explicit VF resource requests/limits; the annotation alone does not reserve
+a VF. This includes future portal-generated LaaS or vLLM workloads.
+
+The injector override is optional in the shared chart. When omitted,
+`enableInjector` continues to follow `operator.admissionControllers.enabled`;
+an explicit `false` disables only the injector, not the policy webhook.
+
 ## Files and rendering
 
 `deployment/bertha/values.yaml` is an environment values overlay.

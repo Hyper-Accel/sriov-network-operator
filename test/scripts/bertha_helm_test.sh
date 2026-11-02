@@ -51,6 +51,47 @@ test_ExtraDeploy_Object_And_Template_Document_Boundaries() {
     assertContains "$output" "name: boundary-test"
 }
 
+test_Injector_Default_Follows_Admission_Controller_Setting() {
+    local enabled output status
+    for enabled in false true; do
+        output=$(helm template admission-test "$CHART" \
+            --set sriovOperatorConfig.deploy=true \
+            --set "operator.admissionControllers.enabled=$enabled" \
+            --show-only templates/sriovoperatorconfig.yaml 2>&1)
+        status=$?
+        assertEquals "$output" 0 "$status"
+        assertContains "$output" "enableInjector: $enabled"
+        assertContains "$output" "enableOperatorWebhook: $enabled"
+    done
+}
+
+test_Injector_Override_Is_Independent_Of_Policy_Webhook() {
+    local enabled injector output status
+    for enabled in false true; do
+        for injector in false true; do
+            output=$(helm template admission-test "$CHART" \
+                --set sriovOperatorConfig.deploy=true \
+                --set "operator.admissionControllers.enabled=$enabled" \
+                --set "sriovOperatorConfig.enableInjector=$injector" \
+                --show-only templates/sriovoperatorconfig.yaml 2>&1)
+            status=$?
+            assertEquals "$output" 0 "$status"
+            assertContains "$output" "enableInjector: $injector"
+            assertContains "$output" "enableOperatorWebhook: $enabled"
+        done
+    done
+}
+
+test_Bertha_Disables_Injector_But_Keeps_Policy_Webhook() {
+    local output status
+    output=$(helm template bertha-test "$CHART" -f "$PROFILE/values.yaml" \
+        --show-only templates/sriovoperatorconfig.yaml 2>&1)
+    status=$?
+    assertEquals "$output" 0 "$status"
+    assertContains "$output" "enableInjector: false"
+    assertContains "$output" "enableOperatorWebhook: true"
+}
+
 test_Bootstrap_Has_No_Policies_Network_Or_Pods() {
     local output status
     output=$(renderBertha 2>&1)
