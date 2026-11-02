@@ -5,17 +5,21 @@ two explicitly selected Broadcom BCM957608-P1400GDF00 PFs per enabled node.
 The expected healthy capacity is `hyperaccel.ai/bertha_rnic: 2` per node, or
 eight VFs across `bertha-xlarge-101`, `102`, `105`, and `109`.
 
+For the completed node101 Pod allocation and VF-to-VF functional tests after
+the NVM change and reboot, see
+[the 2026-11-02 validation record](bertha-node101-validation.md).
+
 It does not install DKMS drivers, replace host libraries, flash firmware, or
 implement an autonomous RDMA validator. Infrastructure provisions the runtime
-team's stack first. The validation Pods exercise actual VF allocation and
-provide a place to run inter-node tests.
+team's stack first. Test workloads and their network configuration are managed
+separately; they are not shipped as part of this profile.
 
 ## Files and rendering
 
 `deployment/bertha/values.yaml` is an environment values overlay.
-`node-policies.yaml`, `pool-config.yaml`, `network.yaml`, and
-`validation-pod.yaml` are Helm template strings, **not manifests to pass directly
-to kubectl**. The existing chart evaluates them through `extraDeploy`; no
+`node-policies.yaml` and `pool-config.yaml` are Helm template strings,
+**not manifests to pass directly to kubectl**. The existing chart evaluates
+them through `extraDeploy`; no
 company-specific controller is required. The shared template preserves the
 newline after each YAML document separator, including when the supplied
 template trims its own leading whitespace.
@@ -35,13 +39,11 @@ ARGS=(
   -f "$SITE"
   --set-file "extraDeploy[0]=$PROFILE/node-policies.yaml"
   --set-file "extraDeploy[1]=$PROFILE/pool-config.yaml"
-  --set-file "extraDeploy[2]=$PROFILE/network.yaml"
-  --set-file "extraDeploy[3]=$PROFILE/validation-pod.yaml"
 )
 ```
 
 Create the site values file at your chosen path before running these commands.
-Keep it for subsequent upgrades. Do not omit any of the four `--set-file`
+Keep it for subsequent upgrades. Do not omit either of the two `--set-file`
 arguments, replace `extraDeploy` elsewhere, or use `--reuse-values` to carry
 unreviewed settings forward.
 
@@ -58,6 +60,9 @@ The inspected baseline is:
 - Compatible rdma-core/libibverbs and the Broadcom provider in the directory
   actually searched by libibverbs.
 - Correct board firmware, RDMA enabled, and SR-IOV available on both RNIC PFs.
+- **RDMA SR-IOV enabled separately from PF RDMA.** On niccli 233.0.150.0,
+  `support_rdma=True` and `enable_sriov=Enabled` are not sufficient:
+  `disable_rdma_sriov` must be `False` for the selected PF.
 - Host-level runtime `make check` and functional RDMA tests completed against
   the intended Thor 2 devices, not merely the first Broadcom devices found.
 
@@ -79,8 +84,8 @@ are rejected by the profile. Keep operator, daemon and webhook images aligned
 with the source/chart revision and use compatible CNI and device-plugin images.
 The profile does not guess a release or publish a container image.
 
-All nodes, the network and validation Pods are disabled by default. With pinned
-images, the bootstrap render contains no node policies, SriovNetwork or test
+All nodes are disabled by default. With pinned images, the bootstrap render
+contains no node policies. The profile does not create a SriovNetwork or test
 Pods. It does include the operator configuration and a pool with
 `maxUnavailable: 1`. The daemon selector requires both:
 
@@ -103,8 +108,9 @@ helm template sriov-network-operator "$CHART" \
 An initial render without pinned images is expected to fail. Lint/render is
 local validation, not proof that images can be pulled or hardware works.
 The profile and shared document-boundary regression checks run without a
-cluster using `bash test/scripts/bertha_helm_test.sh`; all addresses, device IDs
-and images in that script are render-only fixtures.
+cluster using `bash test/scripts/bertha_helm_test.sh`. The tests use render-only
+images and synthetic hardware fixtures, and also check the verified node101
+defaults without contacting the cluster.
 
 After reviewing the output, install explicitly into the Bertha context:
 
@@ -123,7 +129,13 @@ not a reason to use `--skip-crds`: the SR-IOV CRDs still need installation.
 
 ## Activate one node at a time
 
-First add the verified mapping to the site file's `supportedExtraNICs` list.
+The base values now contain node101's verified mapping, `14e4 1760 1819`,
+and PF addresses `0000:4a:00.0` and `0000:c8:00.0`. Node101 remains disabled
+in the base profile. Activate it through your site values file and additionally
+set `sriovOperatorConfig.configDaemonNodeSelector.kubernetes.io/hostname`
+to `bertha-xlarge-101` for a first-node rollout. Leave other nodes disabled.
+
+For other hardware, add its verified mapping to `supportedExtraNICs`.
 Each list item is a YAML string with the structure
 `Broadcom_BCM57608: "14e4 PF_ID VF_ID"`, where both IDs are four lowercase
 hexadecimal digits obtained from the hardware/vendor data. Set
@@ -166,85 +178,59 @@ Disabling a previously managed node/policy is **not** a harmless pause: policy
 removal can reset VFs. Do not remove labels, disable nodes, uninstall the release
 or reduce policies with live consumers without a planned teardown.
 
-## Static validation network
+## Workload networking and historical test releases
 
-This is an explicit-address test network, not production IP address management.
-Confirm `/opt/cni/bin/static` exists on each target node; the SR-IOV operator
-does not install that IPAM binary. Reserve distinct addresses on the real RNIC
-subnet and confirm switch/VLAN/MTU connectivity with infrastructure.
-Do not use host-local with an identical allocation range independently on all
-nodes. A future production IPAM design is separate from this test profile.
+Manage workload SriovNetwork/NAD and IPAM configuration separately, using the
+policy's `bertha_rnic` resource. This profile does not force a host-wide RDMA
+namespace-mode change or add an RDMA CNI chain implicitly.
 
-Create `bertha.network.namespace` (default `bertha-rdma-test`) first. Set
-`bertha.network.enabled: true`, the real `vlan` if needed, and keep
-`network.ipam.type: static`. Render and upgrade, then require the generated NAD:
+The node101 test overlays, network, Pod template and image build file are no
+longer shipped. Their observed setup, commands and results are retained in
+[the validation record](bertha-node101-validation.md).
 
-```bash
-kubectl --kubeconfig="$KCFG" --context="$CTX" create namespace bertha-rdma-test
-kubectl --kubeconfig="$KCFG" --context="$CTX" -n "$NS" \
-  get sriovnetwork bertha-rdma -o yaml
-kubectl --kubeconfig="$KCFG" --context="$CTX" -n bertha-rdma-test \
-  get network-attachment-definition bertha-rdma -o yaml
-```
+Repository cleanup does not change the installed Helm release. Before upgrading
+a release that previously included those test resources, preserve its active
+node selections and pinned images in your site values, inspect its existing
+manifest, and review the removal of the Helm-managed test Pod and SriovNetwork.
+Do not apply the disabled base defaults over an active deployment.
 
-The network and policy both use `bertha_rnic`. The profile does not force a
-host-wide RDMA namespace-mode change or add an RDMA CNI chain implicitly.
-Validate device visibility on this exact Broadcom stack before changing either.
+## RDMA SR-IOV firmware prerequisite
 
-## Validation Pods
+The initial node101 activation successfully created VF `0000:4b:00.0` under
+PF `0000:4a:00.0` and VF `0000:c9:00.0` under PF `0000:c8:00.0`, both with
+device ID `1819` and driver `bnxt_en`. However, both RNICs still reported
+`disable_rdma_sriov=True`. Only the two PF RDMA devices existed; neither VF
+had an RDMA auxiliary device. Consequently the device plugin correctly
+excluded both VFs with `isRdma: true` and did not advertise the RDMA resource.
 
-The test image must contain the runtime-compatible libibverbs and Broadcom
-provider, plus `ip`, `ibv_devinfo`, `rping`, a POSIX shell, `readlink` and `tail`.
-It must not run the host installer on startup. Host libraries are not
-automatically installed inside a workload image.
-
-Set `bertha.validation.image` to a pinned image. In
-`bertha.validation.nodes`, set reserved IPv4 CIDR addresses for at least two
-enabled nodes (default names: 101 and 102), then enable validation. The generated
-Pods request/limit one `hyperaccel.ai/bertha_rnic` each, attach the NAD as
-`net1`, and pass their reserved addresses through the Multus annotation.
-Registry pull secrets, if used, must exist in the test namespace as well.
-
-Each Pod verifies `net1` is a VF and opens the RDMA device whose sysfs device
-belongs to that VF, rather than accepting any Broadcom HCA on the node. On
-success it logs `RDMA_READY` and remains running for manual communication
-tests. A Running Pod alone is not a successful validation result.
+Check this option independently on each card before activation. The syntax
+below was verified against the installed niccli 233.0.150.0:
 
 ```bash
-kubectl --kubeconfig="$KCFG" --context="$CTX" -n bertha-rdma-test \
-  logs -f thor2-check-bertha-xlarge-101
-kubectl --kubeconfig="$KCFG" --context="$CTX" -n bertha-rdma-test \
-  logs -f thor2-check-bertha-xlarge-102
+niccli -pci 0000:4a:00.0 nvm -getoption support_rdma -scope 0
+niccli -pci 0000:4a:00.0 nvm -getoption disable_rdma_sriov -scope 0
+niccli -pci 0000:c8:00.0 nvm -getoption disable_rdma_sriov -scope 0
+niccli -pci 0000:4a:00.0 nvm -optionhelp disable_rdma_sriov
 ```
 
-After both log `RDMA_READY`, in one terminal run the server, substituting the
-reserved net1 address of the 102 Pod **without** its prefix:
+The option help identifies it as a per-PF RoCE SR-IOV setting and requires
+at least three MSI-X vectors per VF. Infrastructure must set it to `0`
+(`False`) on the two RNIC PFs and arrange the supported apply/reset procedure.
+The NVM write commands for that maintenance operation are:
 
 ```bash
-kubectl --kubeconfig="$KCFG" --context="$CTX" -n bertha-rdma-test \
-  exec -it thor2-check-bertha-xlarge-102 -- rping -s -a "$SERVER_VF_IP" -v
+niccli -pci 0000:4a:00.0 nvm -setoption disable_rdma_sriov -scope 0 -value 0
+niccli -pci 0000:c8:00.0 nvm -setoption disable_rdma_sriov -scope 0 -value 0
 ```
 
-When the server is listening, use another terminal for the finite client test:
+These commands were not run during the initial operator deployment.
+The query/help output does not establish whether this firmware can apply the
+change live. Do not assume a VF rebind, PF reset or host reboot is harmless or
+interchangeable, and do not unload the shared bnxt drivers on a live node.
+The profile deliberately does not mutate NVRAM or reset adapters.
 
-```bash
-kubectl --kubeconfig="$KCFG" --context="$CTX" -n bertha-rdma-test \
-  exec -it thor2-check-bertha-xlarge-101 -- \
-  rping -c -a "$SERVER_VF_IP" -C 10 -V -v
-```
-
-Use only the reserved VF-network address, not the Pod's primary Cilium IP.
-Record successful validated transfers; device enumeration alone does not prove
-communication. Stop the server after testing. These are CPU-memory RDMA tests,
-not proof of Bertha peer-memory DMA or 400G throughput.
-
-Each test Pod consumes one of the node's two VFs. With one VF per PF, requesting
-two VFs can consume both physical RNICs, but this asset deliberately attaches
-one VF per Pod. Check both PFs in the node state; a one-Pod test does not prove
-both physical links.
-
-Pod networking and many Pod spec fields are immutable. To change test addresses
-or attachments, disable **only validation**, upgrade to remove the test Pods,
-then re-enable it with the new values and upgrade again. This releases test VFs
-without deleting node policies. Keep node/network activation separate from
-test-Pod cleanup.
+After the setting takes effect, require RDMA devices for both VFs, not just
+the PFs. If the device plugin was started while no VF RDMA devices existed,
+restart its node101 Pod after host discovery is correct so it rescans devices.
+Never change `isRdma` to `false` merely to make the resource count appear:
+Ethernet VF availability is not RDMA readiness.

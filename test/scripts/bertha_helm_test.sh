@@ -33,8 +33,6 @@ renderBertha() {
         --kube-version 1.36.4 -f "$PROFILE/values.yaml" \
         --set-file "extraDeploy[0]=$PROFILE/node-policies.yaml" \
         --set-file "extraDeploy[1]=$PROFILE/pool-config.yaml" \
-        --set-file "extraDeploy[2]=$PROFILE/network.yaml" \
-        --set-file "extraDeploy[3]=$PROFILE/validation-pod.yaml" \
         --set-json "images=$IMAGES" \
         --set-string bertha.deviceID=abcd \
         --set-json 'supportedExtraNICs=["RenderOnly: \"14e4 abcd abce\""]' \
@@ -87,7 +85,8 @@ test_One_Node_Can_Be_Activated_Independently() {
 
 test_Activation_Rejects_Missing_Or_Duplicate_PFs() {
     local output
-    output=$(renderBertha --set bertha.nodes.bertha-xlarge-101.enabled=true 2>&1)
+    output=$(renderBertha --set bertha.nodes.bertha-xlarge-101.enabled=true \
+        --set-json 'bertha.nodes.bertha-xlarge-101.rootDevices=[]' 2>&1)
     assertNotEquals "$output" 0 "$?"
     output=$(renderBertha --set-json 'bertha.nodes={"bertha-xlarge-101":{"enabled":true,"rootDevices":["0000:81:00.0","0000:81:00.0"]}}' 2>&1)
     assertNotEquals "$output" 0 "$?"
@@ -123,50 +122,25 @@ test_Untagged_And_Latest_Images_Are_Rejected() {
     assertNotEquals "$output" 0 "$?"
 }
 
-test_Network_Requires_An_Active_Policy() {
-    local output
-    output=$(renderBertha --set bertha.network.enabled=true 2>&1)
-    assertNotEquals "$output" 0 "$?"
-}
-
-test_Validation_Requires_Network_Image_And_Addresses() {
-    local output
-    output=$(renderBertha --set bertha.validation.enabled=true 2>&1)
-    assertNotEquals "$output" 0 "$?"
-    output=$(renderBertha --set-json "bertha.nodes=$FOUR_NODES" \
-        --set bertha.network.enabled=true,bertha.validation.enabled=true 2>&1)
-    assertNotEquals "$output" 0 "$?"
-    output=$(renderBertha --set-json "bertha.nodes=$FOUR_NODES" \
-        --set bertha.network.enabled=true,bertha.validation.enabled=true \
-        --set-string bertha.validation.image=registry.invalid/rdma:render-test 2>&1)
-    assertNotEquals "$output" 0 "$?"
-}
-
-test_Validation_Uses_Static_Addresses_And_One_Resource_Each() {
+test_Verified_Node101_Policy_Is_Narrowly_Selected() {
     local output status
-    output=$(renderBertha --set-json "bertha.nodes=$FOUR_NODES" \
-        --set bertha.network.enabled=true,bertha.validation.enabled=true \
-        --set-string bertha.validation.image=registry.invalid/rdma:render-test \
-        --set-string bertha.validation.nodes.bertha-xlarge-101.address=192.0.2.1/24 \
-        --set-string bertha.validation.nodes.bertha-xlarge-102.address=192.0.2.2/24 2>&1)
+    output=$(helm template bertha-test "$CHART" -n sriov-network-operator \
+        -f "$PROFILE/values.yaml" --set-json "images=$IMAGES" \
+        --set bertha.nodes.bertha-xlarge-101.enabled=true \
+        --set-file "extraDeploy[0]=$PROFILE/node-policies.yaml" \
+        --set-file "extraDeploy[1]=$PROFILE/pool-config.yaml" 2>&1)
     status=$?
     assertEquals "$output" 0 "$status"
-    assertEquals "2" "$(printf '%s\n' "$output" | awk '$0 == "kind: Pod" {n++} END {print n+0}')"
-    assertEquals "4" "$(printf '%s\n' "$output" | awk '$1 == "hyperaccel.ai/bertha_rnic:" && $2 == "\"1\"" {n++} END {print n+0}')"
-    assertContains "$output" "192.0.2.1/24"
-    assertContains "$output" "192.0.2.2/24"
-    assertContains "$output" "kind: SriovNetwork"
-    assertNotContains "$output" "---apiVersion"
-}
-
-test_Validation_Rejects_Duplicate_Addresses() {
-    local output
-    output=$(renderBertha --set-json "bertha.nodes=$FOUR_NODES" \
-        --set bertha.network.enabled=true,bertha.validation.enabled=true \
-        --set-string bertha.validation.image=registry.invalid/rdma:render-test \
-        --set-string bertha.validation.nodes.bertha-xlarge-101.address=192.0.2.1/24 \
-        --set-string bertha.validation.nodes.bertha-xlarge-102.address=192.0.2.1/25 2>&1)
-    assertNotEquals "$output" 0 "$?"
+    assertEquals "1" "$(printf '%s\n' "$output" | awk '$0 == "kind: SriovNetworkNodePolicy" {n++} END {print n+0}')"
+    assertContains "$output" 'Broadcom_BCM57608: "14e4 1760 1819"'
+    assertContains "$output" 'deviceID: "1760"'
+    assertContains "$output" "0000:4a:00.0"
+    assertContains "$output" "0000:c8:00.0"
+    assertContains "$output" 'kubernetes.io/hostname: "bertha-xlarge-101"'
+    assertNotContains "$output" "thor2-bertha-xlarge-102"
+    assertNotContains "$output" "thor2-bertha-xlarge-105"
+    assertNotContains "$output" "thor2-bertha-xlarge-109"
+    assertEquals "0" "$(printf '%s\n' "$output" | awk '$0 == "kind: SriovNetwork" || $0 == "kind: Pod" {n++} END {print n+0}')"
 }
 
 source "$SCRIPTPATH/shunit2"
